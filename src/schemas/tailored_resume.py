@@ -2,19 +2,8 @@
 TailoredResume schema.
 
 Output of tailor_resume. Same SHAPE as ParsedResume so render_pdf can
-treat them interchangeably, but with two crucial constraints:
-
-  1. Immutable identity fields (title, company, dates) MUST equal the
-     originals. We enforce this in code after the LLM returns.
-
-  2. Audit fields (changes_made, bullets_kept_unchanged) tell us exactly
-     what was rephrased so a human can review before sending.
-
-WHY MIRROR THE PARSED RESUME SHAPE INSTEAD OF A "DIFF" SHAPE:
-  render_pdf only knows how to render a ParsedResume-like structure.
-  If we returned diffs, render_pdf would need to apply them to the
-  original. That's coupling we don't want — keep render_pdf dumb and
-  keep tailoring as a transform.
+treat them interchangeably, but with constraints enforced in the prompt
+and again in code post-validation.
 """
 from __future__ import annotations
 from typing import Optional
@@ -29,9 +18,9 @@ class TailoredExperience(BaseModel):
     start_date: str = Field(description="MUST equal the original")
     end_date: str = Field(description="MUST equal the original")
     bullets: list[str] = Field(
-        description="Same number and order intent as original, but bullets "
-                    "with job-relevant content may be rephrased. Bullets "
-                    "without overlap to job keywords MUST be returned verbatim."
+        description="Same number as original, but bullets with job-relevant "
+                    "content may be rephrased. Bullets without overlap to "
+                    "job keywords MUST be returned verbatim."
     )
 
 
@@ -49,6 +38,15 @@ class TailoredSkillCategory(BaseModel):
         description="May be REORDERED to put job-relevant items first. "
                     "NO additions of new skills, NO removals."
     )
+
+
+class TailoredEducation(BaseModel):
+    """Copied verbatim from the parsed resume. Schema mirrors Education."""
+    degree: str
+    institution: str
+    start_date: Optional[str] = Field(description="Start date or null")
+    end_date: Optional[str] = Field(description="End date or null")
+    notes: Optional[str] = Field(description="Extra context or null")
 
 
 class BulletChange(BaseModel):
@@ -79,7 +77,7 @@ class TailoredResume(BaseModel):
     )
 
     # ---- Pass-through (NEVER changes — copied verbatim) ----
-    education: list[dict] = Field(description="Education entries copied unchanged from the parsed resume")
+    education: list[TailoredEducation] = Field(description="Copied unchanged from the parsed resume")
     languages: list[str] = Field(description="Copied unchanged")
     awards: list[str] = Field(description="Copied unchanged")
 
@@ -88,6 +86,5 @@ class TailoredResume(BaseModel):
         description="Every bullet that was rephrased. Empty list means nothing was changed."
     )
     bullets_kept_unchanged: int = Field(
-        description="Count of bullets that were intentionally left alone because "
-                    "they had no overlap with job requirements."
+        description="Count of bullets returned verbatim because no job overlap."
     )
