@@ -1,15 +1,13 @@
 """
-tailor_cover_letter reasoner — v2 (refined prompt).
+tailor_cover_letter reasoner — v3 (with marginal-skill filtering).
 
-Changes from v1 (based on real output review):
-  1. Added "marginal skill" rule: skills marked "(basics)" or only listed
-     in skills section without bullet evidence cannot be amplified into
-     core narrative claims. (Fixes Docker-style hallucination.)
-  2. Hook rules now have explicit good/bad examples instead of just bans.
-  3. Banned phrase list expanded with the "showcasing my ability" family
-     of empty intensifiers.
-  4. Added explicit P3 (closing) rule: must tie candidate evidence to
-     a concrete company need, not parrot their tagline.
+Change vs v2: the resume is sanitized via filter_marginal_skills() before
+being formatted into the prompt. The LLM never sees skills marked as
+"(basics)", "(beginner)", "(self-study)", etc. — and so cannot amplify
+them into claims of expertise.
+
+This is determinism > prompting: rather than telling the LLM not to use
+marginal skills (which it sometimes ignores), we remove them from the input.
 """
 from __future__ import annotations
 
@@ -17,6 +15,7 @@ from src.llm.client import structured_complete
 from src.schemas.resume import ParsedResume
 from src.schemas.job import JobPosting, ScoreResult
 from src.schemas.cover_letter import CoverLetter
+from src.utils.resume_filters import filter_marginal_skills
 
 
 SYSTEM_PROMPT = """You are an experienced career writer helping a candidate apply to a specific job.
@@ -50,74 +49,43 @@ P2 — EVIDENCE (3-5 sentences):
   technology names, company names. Numbers when present in resume.
 
 P3 — CLOSING (2-3 sentences):
-  This is NOT a place to parrot the company's mission or tagline. Instead:
-  one sentence connecting candidate's PROVEN strength to a SPECIFIC need
-  the job describes; one sentence with a clear next step (availability,
-  call to action). No "I am eager to contribute to {company}'s mission".
+  Not a place to parrot the company's mission or tagline. Instead: one
+  sentence connecting candidate's PROVEN strength to a SPECIFIC need the
+  job describes; one sentence with a clear next step (availability, call
+  to action). No "I am eager to contribute to {company}'s mission".
 
-# HARD RULES (violating these = rejected output)
+# HARD RULES
 
 R1. NEVER invent facts. No fabricated years, no metrics absent from resume.
-
-R2. NEVER amplify marginal skills. If a skill is listed with "(basics)",
-    "(beginner)", "(self-study)", or appears ONLY in the skills section
-    without supporting bullet/project evidence, you may NOT make it a
-    central claim. You MAY mention it briefly as familiarity, never as
-    expertise. Example: a resume saying "Docker (basics)" cannot become
-    "my Docker experience supports my deployment capabilities".
-
-R3. NEVER inflate verbs. "Worked on" is not "led". "Contributed to" is
-    not "owned". "Familiar with" is not "expert in".
-
-R4. NEVER cite a metric (number, %, count) unless verbatim in the resume.
-
-R5. ALWAYS ground claims in evidence. List every cited fact in
-    `key_evidence_used`. If you can't list it, don't write it.
-
-R6. NO empty intensifiers / corporate fluff:
+R2. NEVER inflate verbs. "Worked on" is not "led". "Familiar with" is not "expert in".
+R3. NEVER cite a metric unless verbatim in the resume.
+R4. ALWAYS ground claims. List every cited fact in `key_evidence_used`.
+R5. NO empty intensifiers / corporate fluff:
     - "showcasing my ability to..."
     - "demonstrating my capability for..."
     - "highlighting my skills in..."
     - "leveraging my expertise in..."
     - "bringing value through..."
     - "passionate about", "excited to", "thrilled to"
-    - "team player", "results-oriented", "go-getter", "self-starter"
+    - "team player", "results-oriented", "go-getter"
     - "proven track record", "synergies", "value-add"
-
-R7. NO restating the job description. The reader wrote it; they don't
-    need it back.
-
-R8. NO addressing gaps. If the job requires a skill the candidate lacks,
-    do not mention the gap. Focus on actual strengths.
-
-R9. Match the candidate's actual seniority. Read the years and titles in
-    the resume. Don't write a senior letter for a junior.
+R6. NO restating the job description back at the reader.
+R7. NO addressing gaps. Focus on actual strengths.
+R8. Match the candidate's actual seniority level inferred from titles and years.
 
 # WHAT GOES IN key_evidence_used
 
 For every concrete claim, add the source:
-  - Project name (e.g., "agentic-marketing-stack project")
-  - Job + company (e.g., "NPI role at Intuitive Surgical")
-  - Award (e.g., "Best Local Impact Award 2025")
-  - Specific bullet content (e.g., "scikit-learn diagnostic framework")
-This is a verifiability checklist. If a claim has no entry here, it
-shouldn't be in the letter.
+  - Project name, role + company, award, or specific bullet content.
+This is a verifiability checklist.
 
 # TONE
 
-Formal but human. Direct, confident, evidence-first. The candidate is a
-builder, not a job applicant — they should sound like someone who has
-actually shipped things.
+Formal but human. Direct, confident, evidence-first.
 """
 
 
-# ---------------------------------------------------------------------------
-# The formatting helpers below are unchanged from v1. They live here so the
-# reasoner is self-contained.
-# ---------------------------------------------------------------------------
-
 def _format_resume(resume: ParsedResume) -> str:
-    """Compress resume for the prompt — keep what matters for evidence."""
     parts = [
         f"# Candidate: {resume.full_name}",
         f"\n## Summary\n{resume.summary}",
@@ -157,7 +125,6 @@ def _format_job(job: JobPosting) -> str:
 
 
 def _format_score(score: ScoreResult) -> str:
-    """Pass the score's narrative so the LLM knows what to emphasize."""
     parts = [
         f"# Fit Assessment",
         f"Score: {score.score}/100  ({score.verdict})",
@@ -170,7 +137,7 @@ def _format_score(score: ScoreResult) -> str:
         for s in score.strengths:
             parts.append(f"  - {s}")
     if score.missing_skills:
-        parts.append(f"\nGaps (do NOT address these in the letter): {', '.join(score.missing_skills)}")
+        parts.append(f"\nGaps (do NOT address these): {', '.join(score.missing_skills)}")
     return "\n".join(parts)
 
 
@@ -179,20 +146,13 @@ async def tailor_cover_letter(
     job: JobPosting,
     score: ScoreResult,
 ) -> CoverLetter:
-    """
-    Generate a tailored cover letter for a specific job application.
+    """Generate a tailored cover letter, with marginal skills filtered out."""
+    # Filter marginal skills BEFORE the LLM sees the resume.
+    sanitized = filter_marginal_skills(resume)
 
-    Args:
-        resume: The candidate's parsed resume.
-        job: The job posting being applied to.
-        score: The fit assessment from score_match.
-
-    Returns:
-        CoverLetter with 3 body paragraphs grounded in resume evidence.
-    """
     user_prompt = f"""Write a tailored cover letter for this candidate applying to this job.
 
-{_format_resume(resume)}
+{_format_resume(sanitized)}
 
 ---
 
@@ -204,10 +164,9 @@ async def tailor_cover_letter(
 
 ---
 
-Return a structured CoverLetter following the rules above. Remember: open with
-concrete evidence (a project name, an award, a real shipped system), never
-amplify "(basics)" skills, no empty intensifiers, closing must connect a real
-candidate strength to a specific company need.
+Return a structured CoverLetter following the rules above. Open with concrete
+evidence, no empty intensifiers, closing must connect a real candidate
+strength to a specific company need.
 """
     return await structured_complete(
         schema=CoverLetter,
