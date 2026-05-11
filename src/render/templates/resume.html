@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ resume.full_name }} — Resume</title>
+<style>
+  /* ============================================================
+     RESUME — modern tech style, single column.
+     Section headers in accent color, sans-serif throughout,
+     tight rhythm, generous whitespace between sections.
+     ============================================================ */
+  @page {
+    size: Letter;
+    margin: 0.6in 0.7in;
+  }
+
+  :root {
+    --accent: #1a3d5c;
+    --text-primary: #1a1a1a;
+    --text-muted: #555;
+    --text-faint: #888;
+    --rule: #e5e5e5;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    color: var(--text-primary);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- Header (name + contact) ---------- */
+  header.identity {
+    margin-bottom: 14pt;
+    padding-bottom: 10pt;
+    border-bottom: 1.5px solid var(--accent);
+  }
+  header.identity h1 {
+    margin: 0 0 4pt 0;
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  header.identity .contact {
+    color: var(--text-muted);
+    font-size: 9.5pt;
+    line-height: 1.5;
+  }
+  header.identity .contact span:not(:last-child)::after {
+    content: " · ";
+    color: var(--text-faint);
+  }
+
+  /* ---------- Section headers ---------- */
+  section {
+    margin-top: 14pt;
+  }
+  section h2 {
+    margin: 0 0 8pt 0;
+    font-size: 10.5pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* ---------- Summary ---------- */
+  .summary p {
+    margin: 0;
+    text-align: justify;
+    hyphens: auto;
+  }
+
+  /* ---------- Experience / Projects entries ---------- */
+  .entry {
+    margin-bottom: 11pt;
+  }
+  .entry:last-child { margin-bottom: 0; }
+
+  .entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2pt;
+  }
+  .entry-title {
+    font-weight: 600;
+    font-size: 10.5pt;
+  }
+  .entry-dates {
+    color: var(--text-faint);
+    font-size: 9.5pt;
+    font-variant-numeric: tabular-nums;
+  }
+  .entry-sub {
+    color: var(--text-muted);
+    font-size: 9.5pt;
+    font-style: italic;
+    margin-bottom: 4pt;
+  }
+  .entry-desc {
+    margin: 0 0 4pt 0;
+  }
+  ul.bullets {
+    margin: 4pt 0 0 0;
+    padding-left: 14pt;
+  }
+  ul.bullets li {
+    margin-bottom: 2pt;
+    text-align: justify;
+    hyphens: auto;
+  }
+
+  /* ---------- Skills (single-column rows) ---------- */
+  .skill-row {
+    margin-bottom: 4pt;
+  }
+  .skill-row .cat {
+    font-weight: 600;
+    color: var(--accent);
+    margin-right: 4pt;
+  }
+
+  /* ---------- Compact lists (education, languages, awards) ---------- */
+  .compact-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .compact-list li {
+    margin-bottom: 3pt;
+  }
+
+  /* Prevent orphaned section headers */
+  h2 { page-break-after: avoid; }
+  .entry { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+  <header class="identity">
+    <h1>{{ resume.full_name }}</h1>
+    <div class="contact">
+      {% if resume.email %}<span>{{ resume.email }}</span>{% endif %}
+      {% if resume.phone %}<span>{{ resume.phone }}</span>{% endif %}
+      {% if resume.location %}<span>{{ resume.location }}</span>{% endif %}
+      {% if resume.github_url %}<span>{{ resume.github_url }}</span>{% endif %}
+      {% if resume.linkedin_url %}<span>{{ resume.linkedin_url }}</span>{% endif %}
+    </div>
+  </header>
+
+  {% if resume.summary %}
+  <section class="summary">
+    <h2>Summary</h2>
+    <p>{{ resume.summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if resume.experience %}
+  <section>
+    <h2>Experience</h2>
+    {% for exp in resume.experience %}
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">{{ exp.title }}</span>
+        <span class="entry-dates">{{ exp.start_date }} – {{ exp.end_date }}</span>
+      </div>
+      <div class="entry-sub">
+        {{ exp.company }}{% if exp.location %} · {{ exp.location }}{% endif %}
+      </div>
+      {% if exp.bullets %}
+      <ul class="bullets">
+        {% for b in exp.bullets %}<li>{{ b }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if resume.projects %}
+  <section>
+    <h2>Projects</h2>
+    {% for proj in resume.projects %}
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">{{ proj.name }}</span>
+      </div>
+      {% if proj.stack %}
+      <div class="entry-sub">{{ proj.stack | join(' · ') }}</div>
+      {% endif %}
+      {% if proj.description %}
+      <p class="entry-desc">{{ proj.description }}</p>
+      {% endif %}
+      {% if proj.bullets %}
+      <ul class="bullets">
+        {% for b in proj.bullets %}<li>{{ b }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if resume.skills %}
+  <section>
+    <h2>Technical Skills</h2>
+    {% for cat in resume.skills %}
+    <div class="skill-row">
+      <span class="cat">{{ cat.name }}:</span>{{ cat.items | join(' · ') }}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if resume.education %}
+  <section>
+    <h2>Education</h2>
+    <ul class="compact-list">
+    {% for edu in resume.education %}
+      <li>
+        <strong>{{ edu.degree }}</strong> — {{ edu.institution }}
+        {% if edu.end_date %}<span style="color: var(--text-faint)"> · {{ edu.start_date or '' }}{% if edu.start_date %} – {% endif %}{{ edu.end_date }}</span>{% endif %}
+        {% if edu.notes %}<div style="color: var(--text-muted); font-size: 9.5pt;">{{ edu.notes }}</div>{% endif %}
+      </li>
+    {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if resume.awards %}
+  <section>
+    <h2>Awards</h2>
+    <ul class="compact-list">
+      {% for a in resume.awards %}<li>{{ a }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if resume.languages %}
+  <section>
+    <h2>Languages</h2>
+    <p>{{ resume.languages | join(' · ') }}</p>
+  </section>
+  {% endif %}
+
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ letter.subject }}</title>
+<style>
+  /* ============================================================
+     COVER LETTER — modern tech style
+     Single accent color, system-stack sans-serif fallback,
+     generous whitespace, no decorative chrome.
+     ============================================================ */
+  @page {
+    size: Letter;
+    margin: 0.9in 1in;
+  }
+
+  :root {
+    --accent: #1a3d5c;       /* deep navy — confident, not corporate */
+    --text-primary: #1a1a1a;
+    --text-muted: #555;
+    --text-faint: #888;
+    --rule: #e5e5e5;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    color: var(--text-primary);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Header block: sender info */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 16pt;
+    margin-bottom: 28pt;
+    border-bottom: 1.5px solid var(--accent);
+  }
+  .header .name {
+    font-size: 18pt;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--accent);
+    margin: 0;
+  }
+  .header .contact {
+    font-size: 9.5pt;
+    color: var(--text-muted);
+    text-align: right;
+    line-height: 1.6;
+  }
+  .header .contact div { margin: 0; }
+
+  /* Date */
+  .date {
+    color: var(--text-faint);
+    font-size: 10pt;
+    margin-bottom: 24pt;
+  }
+
+  /* Greeting */
+  .greeting {
+    margin: 0 0 16pt 0;
+    font-weight: 500;
+  }
+
+  /* Body paragraphs */
+  .body p {
+    margin: 0 0 14pt 0;
+    text-align: justify;
+    hyphens: auto;
+  }
+
+  /* Sign-off */
+  .signoff {
+    margin-top: 28pt;
+    white-space: pre-line;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <p class="name">{{ candidate.full_name }}</p>
+    </div>
+    <div class="contact">
+      {% if candidate.email %}<div>{{ candidate.email }}</div>{% endif %}
+      {% if candidate.phone %}<div>{{ candidate.phone }}</div>{% endif %}
+      {% if candidate.location %}<div>{{ candidate.location }}</div>{% endif %}
+      {% if candidate.github_url %}<div>{{ candidate.github_url }}</div>{% endif %}
+      {% if candidate.linkedin_url %}<div>{{ candidate.linkedin_url }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="date">{{ today }}</div>
+
+  <p class="greeting">{{ letter.greeting }}</p>
+
+  <div class="body">
+    {% for paragraph in letter.body_paragraphs %}
+      <p>{{ paragraph }}</p>
+    {% endfor %}
+  </div>
+
+  <div class="signoff">{{ letter.sign_off }}</div>
+
+</body>
+</html>
