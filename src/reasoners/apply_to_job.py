@@ -11,8 +11,9 @@ WHY THIS DESIGN BEATS PER-SITE 'MANUALS':
   reads the actual page state and picks the actual next step.
 
 LOOP CONTRACT (the spec the demo lives or dies by):
+  sess = await ab.start_session(session_id="agentfield", open_url=job.url)
   while step < max_steps:
-      snapshot  = await ab.snapshot(session)
+      snapshot  = await ab.snapshot(session=sess.session_id, tab=sess.tab_id)
       decision  = await structured_complete(ActionDecision, ...)
       history.append(decision)
       if decision.kind == 'done':   → record success, return
@@ -21,6 +22,11 @@ LOOP CONTRACT (the spec the demo lives or dies by):
           → screenshot moment-of-truth, record manual_review with dry_run=True, return
       _execute(decision)   # click/fill/select/upload/wait/scroll/submit
   → timeout: record manual_review with steps_taken=max_steps
+
+REFS — TWO SYNTAXES IN THE SAME SYSTEM:
+  Snapshots produced by Actionbook label elements as `[ref=e5]`. When
+  emitting an action, the LLM must convert that to `@e5` (with an `@`,
+  no brackets). The system prompt below makes this explicit.
 
 ANTI-LOOP GUARD:
   If the LLM emits the same (kind, ref) three times in a row, we bail to
@@ -32,9 +38,8 @@ DEFENSIVE LAYERS:
   3. Confidence gate    — low confidence on destructive action (upload, submit)
                           aborts the loop with a screenshot, not a click.
   4. Consistency check  — if kind='submit' but is_terminal=True, treat as
-                          schema violation and abort (the LLM contradicted
-                          itself; don't trust the action).
-  5. Max steps          — hard cap (default 25) so we never run forever.
+                          schema violation and abort.
+  5. Max steps          — hard cap (default 25).
 
 WHY THE LLM SEES PROFILE + JOB + COVER LETTER:
   - Profile so it can fill EEO/work-auth fields without inventing answers.
@@ -57,6 +62,7 @@ from src.schemas.job import JobPosting
 from src.adapters.browser.actionbook_client import (
     ActionbookClient,
     ActionbookError,
+    BrowserSession,
 )
 from src.utils.application_history import (
     already_applied,
@@ -69,34 +75,39 @@ from src.utils.application_history import (
 # already tried". Keeps prompt size bounded — older history is dropped.
 _HISTORY_WINDOW = 8
 
-# Anti-loop guard: same (kind, ref) emitted this many times in a row → bail.
+# Anti-loop guard: same (kind, ref, value) emitted this many times in a row → bail.
 _REPEAT_LIMIT = 3
 
-# Default scroll delta in pixels when LLM asks to scroll. Empirical: large
-# enough to reveal new fields below the fold, small enough to not skip them.
-_SCROLL_DELTA_PX = 800
-
-# Cap how long a single "wait" action can pause. The LLM sometimes asks for
-# absurd values (e.g. value='30') — we clamp.
+# Cap how long a single "wait" action can pause.
 _MAX_WAIT_SECONDS = 5.0
 
+# Semantic session id for all Actionbook sessions started by this reasoner.
+# Reuses an existing Running session with this id (Actionbook's get-or-create).
+_SESSION_ID = "agentfield"
 
-SYSTEM_PROMPT = """You are an autonomous job-application agent operating a real Chrome browser.
+
+SYSTEM_PROMPT = """You are an autonomous job-application agent operating a real Chrome browser via Actionbook.
 
 You receive on every step:
-  - A text "snapshot" of the current page: each interactive element has a
-    short label and a ref like `@e5` you can target.
+  - A YAML accessibility snapshot of the current page. Each interactive
+    element is labeled with a ref like `[ref=e5]`. To target an element
+    in your action, convert the ref to the `@eN` form (with an `@`, no
+    brackets). For example, `[ref=e12]` in the snapshot becomes `@e12`
+    in your decision's `ref` field.
   - The candidate's personal profile (name, email, work auth, demographics).
   - The job posting being applied to.
   - The cover letter text the candidate wants to submit.
   - History of the actions you have already taken in this session.
 
-You output ONE ActionDecision per call. Your action is then executed against
-the real browser, and you are called again with a fresh snapshot.
+The page may be in a language other than English (the candidate's browser
+locale governs labels). You can read any major language and act on it.
+
+You output ONE ActionDecision per call. Your action is then executed
+against the real browser, and you are called again with a fresh snapshot.
 
 # AVAILABLE ACTIONS (the `kind` field)
 
-- click   — click a button, link, or radio. `ref` required.
+- click   — click a button, link, or radio. `ref` required (e.g. "@e5").
 - fill    — type into a text input or textarea. `ref` required, `value` required.
 - select  — choose an option in a <select>. `ref` required, `value` required
             (use the visible label of the option you want).
@@ -104,9 +115,10 @@ the real browser, and you are called again with a fresh snapshot.
             path to the file (you will be told which path to use for resume/CL).
 - wait    — pause N seconds for the page to settle. `value` = seconds as string
             (e.g. "2"). Use after navigations or dynamic loads, NOT as a stall.
-- scroll  — scroll the page down to reveal more content in the next snapshot.
+- scroll  — scroll the page DOWN to reveal more content. `ref` and `value` null.
             Use when you suspect there are required fields below the fold.
-- submit  — click the final submit button. THIS IS THE MOMENT OF TRUTH.
+- submit  — click the final submit button. `ref` required, pointing at the
+            submit element. THIS IS THE MOMENT OF TRUTH.
 - done    — emit ONLY when the snapshot clearly shows a confirmation page
             ("Application submitted", "Thank you for applying", etc.).
 - stuck   — emit when you cannot proceed: CAPTCHA, login wall, an unknown
@@ -151,6 +163,10 @@ R8. If the same action did not change the page in the previous step, do NOT
 
 R9. NEVER reuse a credit-card / SSN / password field — the profile contains
     none of these. If the form demands them, emit `stuck`.
+
+R10. Ref syntax — the single most common mistake: snapshots show `[ref=e5]`
+     but commands need `@e5`. Always strip the brackets and the `ref=` and
+     prepend `@`.
 
 # DRY-RUN MODE
 
@@ -259,7 +275,7 @@ def _build_user_prompt(
         f"{_format_cover_letter(cover_letter)}\n\n"
         f"{_format_files(resume_pdf, cover_letter_pdf)}\n\n"
         f"{_format_history(history)}\n\n"
-        "# Current page snapshot (your eye into the browser)\n"
+        "# Current page snapshot (YAML, refs as [ref=eN], target as @eN)\n"
         f"{snapshot}\n\n"
         "Decide the ONE next action. Return an ActionDecision."
     )
@@ -271,11 +287,7 @@ def _build_user_prompt(
 
 
 def _validate_decision(d: ActionDecision) -> Optional[str]:
-    """Return an error string if the decision violates schema-consistency rules.
-
-    Pydantic enforces types and the Literal kinds; this enforces semantic
-    rules that span fields (e.g. ref required for click).
-    """
+    """Return an error string if the decision violates schema-consistency rules."""
     # is_terminal consistency
     if d.kind in ("done", "stuck") and not d.is_terminal:
         return f"kind={d.kind} requires is_terminal=True, got False"
@@ -283,7 +295,7 @@ def _validate_decision(d: ActionDecision) -> Optional[str]:
         return f"kind={d.kind} requires is_terminal=False, got True"
 
     # ref requirement
-    if d.kind in ("click", "fill", "select", "upload") and not d.ref:
+    if d.kind in ("click", "fill", "select", "upload", "submit") and not d.ref:
         return f"kind={d.kind} requires a ref but got None"
 
     # value requirement
@@ -320,58 +332,60 @@ async def _execute(
     *,
     client: ActionbookClient,
     session: str,
+    tab: str,
 ) -> None:
     """Translate an ActionDecision into one or more ActionbookClient calls.
 
-    Caller is responsible for handling the terminal kinds (done, stuck, submit).
-    This function is only called for executable, non-terminal actions.
+    Caller is responsible for handling the terminal kinds (done, stuck) and
+    for intercepting submit in dry-run mode. This function is only called
+    for executable, non-terminal actions including submit (when allowed).
     """
     kind = decision.kind
 
     if kind == "click":
-        await client.click(decision.ref, session=session)  # type: ignore[arg-type]
+        await client.click(decision.ref, session=session, tab=tab)  # type: ignore[arg-type]
 
     elif kind == "fill":
-        await client.fill(decision.ref, decision.value, session=session)  # type: ignore[arg-type]
+        await client.fill(
+            decision.ref, decision.value,  # type: ignore[arg-type]
+            session=session, tab=tab,
+        )
 
     elif kind == "select":
-        await client.select(decision.ref, decision.value, session=session)  # type: ignore[arg-type]
+        await client.select(
+            decision.ref, decision.value,  # type: ignore[arg-type]
+            session=session, tab=tab,
+        )
 
     elif kind == "upload":
-        await client.upload(decision.ref, decision.value, session=session)  # type: ignore[arg-type]
+        await client.upload(
+            decision.ref, decision.value,  # type: ignore[arg-type]
+            session=session, tab=tab,
+        )
 
     elif kind == "wait":
         seconds = max(0.0, min(_MAX_WAIT_SECONDS, float(decision.value or "1")))
         await client.wait(seconds)
 
     elif kind == "scroll":
-        # The wrapper does not expose a `scroll` command directly; emulate
-        # with JS. Documented in actionbook_client.py.
-        await client.eval_js(
-            f"window.scrollBy(0, {_SCROLL_DELTA_PX})",
-            session=session,
-        )
+        # Native scroll exists in Actionbook v0.4.2 — no eval_js needed.
+        await client.scroll("down", session=session, tab=tab)
 
     elif kind == "submit":
-        # The caller decides whether we ever get here. In real-submit mode,
-        # this is the one and only time we click submit.
-        # If the LLM provided a ref, use it; otherwise the LLM should have
-        # pointed at the submit button via `ref`. We require it for safety.
         if not decision.ref:
             raise ActionbookError(
                 cmd="submit",
                 returncode=-1,
                 stderr="kind=submit requires ref pointing to the submit button",
             )
-        await client.click(decision.ref, session=session)
+        await client.click(decision.ref, session=session, tab=tab)
 
     else:
-        # done/stuck handled before dispatch; this branch means a bug.
         raise ValueError(f"_execute called with non-executable kind={kind}")
 
 
 # ----------------------------------------------------------------------
-# Result builders — every exit path goes through one of these
+# Result builders
 # ----------------------------------------------------------------------
 
 
@@ -415,26 +429,7 @@ async def apply_to_job(
 ) -> ApplyResult:
     """Run the autonomous apply loop for a single job.
 
-    Args:
-        job: The job to apply to. Must have a working `url`.
-        profile: The candidate's personal data.
-        cover_letter: The tailored cover letter (text, used for textareas).
-        tailored_resume_pdf: Path to the resume PDF to upload.
-        cover_letter_pdf: Optional path to the cover-letter PDF, if some
-            sites prefer file uploads over textareas.
-        dry_run: If True, the loop never actually clicks the final submit;
-            it screenshots the moment-of-truth and exits as manual_review.
-        confirm: If False, ANY emission of `submit` is treated as dry-run
-            even if dry_run=False. The user must explicitly pass confirm=True
-            to allow real submissions.
-        max_steps: Hard cap on loop iterations.
-        client: Inject a custom ActionbookClient for tests. Production passes None.
-        history_path: Where to read/write the applications log.
-        screenshot_dir: Where to save the moment-of-truth and stuck screenshots.
-
-    Returns:
-        ApplyResult — never raises for normal failure modes. Network/Chrome
-        crashes propagate as preflight_failed / stuck.
+    Returns ApplyResult — never raises for normal failure modes.
     """
     base = _base_result(
         job=job,
@@ -464,7 +459,7 @@ async def apply_to_job(
     if prev is not None:
         result = ApplyResult(
             **base,
-            success=True,  # we count duplicate-of-success as success
+            success=True,
             method_used="duplicate",
             dry_run=dry_run,
             error_message=None,
@@ -488,12 +483,16 @@ async def apply_to_job(
         record_application(result, history_path=history_path)
         return result
 
-    # ---- Browser session ----
+    # ---- Browser session (extension mode, open job URL) ----
     ab = client or ActionbookClient()
     screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        session = await ab.start_session()
+        sess: BrowserSession = await ab.start_session(
+            session_id=_SESSION_ID,
+            open_url=job.url,
+            mode="extension",
+        )
     except ActionbookError as e:
         result = ApplyResult(
             **base,
@@ -505,22 +504,15 @@ async def apply_to_job(
         record_application(result, history_path=history_path)
         return result
 
-    base["actionbook_session_id"] = session
+    session_id = sess.session_id
+    tab_id = sess.tab_id
+    base["actionbook_session_id"] = session_id
 
+    # Give the page a moment to settle before the first snapshot.
     try:
-        await ab.open(job.url, session=session)
-        # Give the page a moment to settle before the first snapshot.
         await ab.wait(2.0)
-    except ActionbookError as e:
-        result = ApplyResult(
-            **base,
-            success=False,
-            method_used="preflight_failed",
-            dry_run=dry_run,
-            error_message=f"could not open apply URL: {e}",
-        )
-        record_application(result, history_path=history_path)
-        return result
+    except ActionbookError:
+        pass
 
     history: list[ActionDecision] = []
     last_decision: Optional[ActionDecision] = None
@@ -528,7 +520,7 @@ async def apply_to_job(
     for step in range(max_steps):
         # 1. Snapshot
         try:
-            snapshot = await ab.snapshot(session=session)
+            snapshot = await ab.snapshot(session=session_id, tab=tab_id)
         except ActionbookError as e:
             result = ApplyResult(
                 **base,
@@ -568,9 +560,8 @@ async def apply_to_job(
         # 3. Validate consistency
         problem = _validate_decision(decision)
         if problem:
-            # Don't trust an inconsistent decision. Bail to manual review.
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "inconsistent"
+                ab, session_id, tab_id, screenshot_dir, job, "inconsistent"
             )
             result = ApplyResult(
                 **base,
@@ -579,7 +570,7 @@ async def apply_to_job(
                 dry_run=dry_run,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=f"LLM produced inconsistent decision: {problem}",
                 last_action_reasoning=decision.reasoning,
             )
@@ -592,7 +583,7 @@ async def apply_to_job(
         # 4. Anti-loop check
         if _is_repeating(history):
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "repeating"
+                ab, session_id, tab_id, screenshot_dir, job, "repeating"
             )
             result = ApplyResult(
                 **base,
@@ -601,7 +592,7 @@ async def apply_to_job(
                 dry_run=dry_run,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=(
                     f"LLM stuck in a loop: repeated kind={decision.kind} "
                     f"ref={decision.ref} value={decision.value!r} "
@@ -615,7 +606,7 @@ async def apply_to_job(
         # 5. Terminal kinds
         if decision.kind == "done":
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "done"
+                ab, session_id, tab_id, screenshot_dir, job, "done"
             )
             result = ApplyResult(
                 **base,
@@ -624,7 +615,7 @@ async def apply_to_job(
                 dry_run=dry_run,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=None,
                 last_action_reasoning=decision.reasoning,
             )
@@ -633,7 +624,7 @@ async def apply_to_job(
 
         if decision.kind == "stuck":
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "stuck"
+                ab, session_id, tab_id, screenshot_dir, job, "stuck"
             )
             result = ApplyResult(
                 **base,
@@ -642,7 +633,7 @@ async def apply_to_job(
                 dry_run=dry_run,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=decision.reasoning,
                 last_action_reasoning=decision.reasoning,
             )
@@ -652,16 +643,16 @@ async def apply_to_job(
         # 6. Submit intercept — dry-run or non-confirmed
         if decision.kind == "submit" and (dry_run or not confirm):
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "moment_of_truth"
+                ab, session_id, tab_id, screenshot_dir, job, "moment_of_truth"
             )
             result = ApplyResult(
                 **base,
-                success=False,  # nothing was submitted
+                success=False,
                 method_used="manual_review",
-                dry_run=True,  # force True regardless of input flag
+                dry_run=True,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=(
                     "DRY-RUN: LLM reached submit but execution was held back. "
                     "Inspect the screenshot and re-run with dry_run=False, "
@@ -675,7 +666,7 @@ async def apply_to_job(
         # 7. Confidence gate on destructive kinds
         if decision.kind in ("submit", "upload") and decision.confidence == "low":
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "low_confidence_destructive"
+                ab, session_id, tab_id, screenshot_dir, job, "low_confidence_destructive"
             )
             result = ApplyResult(
                 **base,
@@ -684,7 +675,7 @@ async def apply_to_job(
                 dry_run=dry_run,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=(
                     f"low-confidence {decision.kind} blocked; "
                     f"reasoning: {decision.reasoning}"
@@ -696,12 +687,12 @@ async def apply_to_job(
 
         # 8. Execute the non-terminal action
         try:
-            await _execute(decision, client=ab, session=session)
+            await _execute(
+                decision, client=ab, session=session_id, tab=tab_id,
+            )
         except ActionbookError as e:
-            # Browser command failed (ref vanished, network blip, etc.).
-            # Don't crash — return manual_review so the user can inspect.
             shot = await _safe_screenshot(
-                ab, session, screenshot_dir, job, "exec_failed"
+                ab, session_id, tab_id, screenshot_dir, job, "exec_failed"
             )
             result = ApplyResult(
                 **base,
@@ -710,7 +701,7 @@ async def apply_to_job(
                 dry_run=dry_run,
                 steps_taken=step + 1,
                 screenshot_path=shot,
-                final_url=await _safe_current_url(ab, session),
+                final_url=await _safe_current_url(ab, session_id, tab_id),
                 error_message=f"executing {decision.kind} failed: {e}",
                 last_action_reasoning=decision.reasoning,
             )
@@ -719,7 +710,7 @@ async def apply_to_job(
 
     # ---- Exhausted max_steps without terminating ----
     shot = await _safe_screenshot(
-        ab, session, screenshot_dir, job, "timeout"
+        ab, session_id, tab_id, screenshot_dir, job, "timeout"
     )
     result = ApplyResult(
         **base,
@@ -728,7 +719,7 @@ async def apply_to_job(
         dry_run=dry_run,
         steps_taken=max_steps,
         screenshot_path=shot,
-        final_url=await _safe_current_url(ab, session),
+        final_url=await _safe_current_url(ab, session_id, tab_id),
         error_message=f"exceeded max_steps={max_steps} without terminating",
         last_action_reasoning=last_decision.reasoning if last_decision else None,
     )
@@ -737,13 +728,14 @@ async def apply_to_job(
 
 
 # ----------------------------------------------------------------------
-# Defensive helpers — never let diagnostic actions crash the result
+# Defensive helpers
 # ----------------------------------------------------------------------
 
 
 async def _safe_screenshot(
     ab: ActionbookClient,
     session: str,
+    tab: str,
     out_dir: Path,
     job: JobPosting,
     tag: str,
@@ -757,7 +749,7 @@ async def _safe_screenshot(
     )
     path = out_dir / fname
     try:
-        return await ab.screenshot(str(path), session=session)
+        return await ab.screenshot(str(path), session=session, tab=tab)
     except ActionbookError:
         return None
 
@@ -765,9 +757,10 @@ async def _safe_screenshot(
 async def _safe_current_url(
     ab: ActionbookClient,
     session: str,
+    tab: str,
 ) -> Optional[str]:
-    """Best-effort current URL; None if the eval fails."""
+    """Best-effort current URL; None if the command fails."""
     try:
-        return await ab.current_url(session=session)
+        return await ab.current_url(session=session, tab=tab)
     except ActionbookError:
         return None
