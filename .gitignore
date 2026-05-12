@@ -21,3 +21,5 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+data/profile.json
+data/applications.json
