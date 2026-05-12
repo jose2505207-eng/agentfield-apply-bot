@@ -2,13 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>{{ resume.full_name }} — Resume</title>
+<title>{{ resume.full_name | title }} — Resume</title>
 <style>
-  /* ============================================================
-     RESUME — modern tech style, single column.
-     Section headers in accent color, sans-serif throughout,
-     tight rhythm, generous whitespace between sections.
-     ============================================================ */
   @page {
     size: Letter;
     margin: 0.6in 0.7in;
@@ -34,7 +29,6 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ---------- Header (name + contact) ---------- */
   header.identity {
     margin-bottom: 14pt;
     padding-bottom: 10pt;
@@ -57,10 +51,7 @@
     color: var(--text-faint);
   }
 
-  /* ---------- Section headers ---------- */
-  section {
-    margin-top: 14pt;
-  }
+  section { margin-top: 14pt; }
   section h2 {
     margin: 0 0 8pt 0;
     font-size: 10.5pt;
@@ -70,17 +61,12 @@
     color: var(--accent);
   }
 
-  /* ---------- Summary ---------- */
   .summary p {
     margin: 0;
-    text-align: justify;
-    hyphens: auto;
+    text-align: left;
   }
 
-  /* ---------- Experience / Projects entries ---------- */
-  .entry {
-    margin-bottom: 11pt;
-  }
+  .entry { margin-bottom: 11pt; }
   .entry:last-child { margin-bottom: 0; }
 
   .entry-header {
@@ -104,40 +90,30 @@
     font-style: italic;
     margin-bottom: 4pt;
   }
-  .entry-desc {
-    margin: 0 0 4pt 0;
-  }
+  .entry-desc { margin: 0 0 4pt 0; }
   ul.bullets {
     margin: 4pt 0 0 0;
     padding-left: 14pt;
   }
   ul.bullets li {
     margin-bottom: 2pt;
-    text-align: justify;
-    hyphens: auto;
+    text-align: left;
   }
 
-  /* ---------- Skills (single-column rows) ---------- */
-  .skill-row {
-    margin-bottom: 4pt;
-  }
+  .skill-row { margin-bottom: 4pt; }
   .skill-row .cat {
     font-weight: 600;
     color: var(--accent);
     margin-right: 4pt;
   }
 
-  /* ---------- Compact lists (education, languages, awards) ---------- */
   .compact-list {
     margin: 0;
     padding: 0;
     list-style: none;
   }
-  .compact-list li {
-    margin-bottom: 3pt;
-  }
+  .compact-list li { margin-bottom: 3pt; }
 
-  /* Prevent orphaned section headers */
   h2 { page-break-after: avoid; }
   .entry { page-break-inside: avoid; }
 </style>
@@ -145,7 +121,7 @@
 <body>
 
   <header class="identity">
-    <h1>{{ resume.full_name }}</h1>
+    <h1>{{ resume.full_name | title }}</h1>
     <div class="contact">
       {% if resume.email %}<span>{{ resume.email }}</span>{% endif %}
       {% if resume.phone %}<span>{{ resume.phone }}</span>{% endif %}

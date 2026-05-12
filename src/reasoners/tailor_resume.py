@@ -1,19 +1,9 @@
 """
-tailor_resume reasoner — v2 (with marginal-skill filtering).
+tailor_resume reasoner — v3 (defense-in-depth marginal filtering).
 
-Change vs v1: applies filter_marginal_skills() to the resume before
-sending to the LLM. The model can't reorder or strip qualifiers from
-skills it never sees. The post-validation step then ensures the returned
-TailoredResume still contains all the ORIGINAL skill set (including the
-marginal ones), so the final PDF preserves the candidate's actual self-rep.
-
-THE FILTERING TRICK:
-  - LLM sees sanitized resume (no "Docker (basics)")
-  - LLM cannot promote, rephrase, or rearrange Docker
-  - After LLM responds, we MERGE the marginal skills back into the
-    appropriate categories (they appear at the end, not the front)
-  - Net result: the PDF shows what the resume actually says, with
-    job-relevant skills emphasized only via legitimate reordering.
+Change vs v2: applies filter_marginal_from_score in addition to
+filter_marginal_skills on the resume. Same rationale as the cover
+letter reasoner — Docker can leak via the ScoreResult's matching_skills.
 """
 from __future__ import annotations
 
@@ -24,7 +14,11 @@ from src.schemas.tailored_resume import (
     TailoredResume,
     TailoredSkillCategory,
 )
-from src.utils.resume_filters import filter_marginal_skills, is_marginal_skill
+from src.utils.resume_filters import (
+    filter_marginal_skills,
+    filter_marginal_from_score,
+    is_marginal_skill,
+)
 
 
 SYSTEM_PROMPT = """You are an expert resume editor. The candidate has applied to
@@ -37,29 +31,21 @@ You are NOT writing a new resume. You are doing a CONSTRAINED REPHRASE.
 A. REORDER skills items inside each category to put job-relevant skills first.
 B. REORDER bullets within an experience or project so the most job-relevant
    appear first.
-C. REPHRASE bullets that have keyword overlap with the job, IF AND ONLY IF
-   the rephrase stays factually identical. Examples allowed:
-     - "Designed a framework" → "Designed a Python-based framework"
-       (added technology already in the resume's skills)
-     - "Built an n8n workflow" → "Built an automated n8n workflow that converts
-       SMS inputs into completed forms"
-       (expanded with detail from the same bullet)
-D. REPHRASE the summary in ONE pass to emphasize job-relevant strengths,
-   without inventing new facts.
+C. REPHRASE bullets that have keyword overlap with the job, IF the rephrase
+   stays factually identical.
+D. REPHRASE the summary in ONE pass to emphasize job-relevant strengths.
 
 # WHAT YOU MUST NOT DO
 
 E1. NEVER inflate verbs:
       "helped with" / "contributed to"  → "contributed to" (max)
       "worked on" / "developed"         → "developed" (max)
-      "designed" / "built" / "created"  → keep as-is (do NOT escalate to
-                                          "architected", "led", "owned")
+      "designed" / "built" / "created"  → keep as-is
       "led" / "owned"                   → keep only if the original used them
 
 E2. NEVER add a skill, technology, or framework that's not in the resume.
 
-E3. NEVER modify a skill's text. If a skill is listed as "Python (pandas, scikit-learn)",
-    return it exactly that way. Do NOT remove parenthetical context.
+E3. NEVER modify a skill's text. Return each skill exactly as it appears.
 
 E4. NEVER add metrics not verbatim in the original.
 
@@ -76,14 +62,9 @@ and rationale tied to a specific job requirement.
 
 # IMMUTABLE PASS-THROUGH
 
-Copy from the input resume verbatim:
-  - full_name, email, phone, location, linkedin_url, github_url
-  - all titles, companies, locations, dates
-  - all project names
-  - skills set (only ORDER may change; not the items themselves)
-  - education entries (each as a TailoredEducation with same fields)
-  - languages
-  - awards
+Copy from the input resume verbatim: contact info, all titles/companies/dates,
+project names, the skills set (only ORDER may change), education entries,
+languages, awards.
 """
 
 
@@ -134,7 +115,7 @@ def _format_job(job: JobPosting) -> str:
 
 def _format_score_signals(score: ScoreResult) -> str:
     parts = ["# Tailoring Signals"]
-    parts.append(f"\nMatching skills (emphasize): {', '.join(score.matching_skills)}")
+    parts.append(f"\nMatching skills: {', '.join(score.matching_skills)}")
     parts.append(f"\nMissing skills (do NOT claim): {', '.join(score.missing_skills)}")
     if score.strengths:
         parts.append("\nStrengths to surface:")
@@ -146,14 +127,7 @@ def _format_score_signals(score: ScoreResult) -> str:
 def _merge_marginal_skills_back(
     tailored: TailoredResume, original: ParsedResume
 ) -> None:
-    """
-    The LLM never saw marginal skills. Now we add them back at the END of
-    each category so they appear on the final PDF (preserving truth) without
-    having been re-promoted by the LLM.
-
-    Mutates `tailored` in place.
-    """
-    # Build a map: category_name → list of marginal items from the original.
+    """The LLM never saw marginal skills. Add them back at the END of each category."""
     marginal_by_cat: dict[str, list[str]] = {}
     for cat in original.skills:
         marginals = [item for item in cat.items if is_marginal_skill(item)]
@@ -163,7 +137,6 @@ def _merge_marginal_skills_back(
     if not marginal_by_cat:
         return
 
-    # For each category in the tailored output, append the marginal items.
     seen_categories = set()
     for cat in tailored.skills:
         seen_categories.add(cat.name)
@@ -172,8 +145,6 @@ def _merge_marginal_skills_back(
                 if item not in cat.items:
                     cat.items.append(item)
 
-    # If a marginal category was dropped entirely by the filter (because ALL
-    # its items were marginal), re-add it as a fresh TailoredSkillCategory.
     for cat_name, items in marginal_by_cat.items():
         if cat_name not in seen_categories:
             tailored.skills.append(
@@ -220,23 +191,16 @@ async def tailor_resume(
     job: JobPosting,
     score: ScoreResult,
 ) -> tuple[TailoredResume, list[str]]:
-    """
-    Tailor a resume to a specific job posting.
-
-    Pipeline:
-      1. Filter marginal skills (LLM cannot see them)
-      2. Send sanitized resume + job + score to LLM
-      3. Merge marginal skills back at end of their categories (truth preserved)
-      4. Enforce immutable fields (defense in depth)
-    """
-    sanitized = filter_marginal_skills(resume)
+    """Tailor a resume with double-filtered inputs and post-validation."""
+    sanitized_resume = filter_marginal_skills(resume)
+    sanitized_score = filter_marginal_from_score(score, resume)
 
     user_prompt = f"""Rewrite the candidate's resume to emphasize fit with the target job.
 
 Follow the rules strictly. Use [bN] indices to refer to specific bullets in
-your changes_made entries (e.g., "Experience: NPI role, b2").
+your changes_made entries.
 
-{_format_resume(sanitized)}
+{_format_resume(sanitized_resume)}
 
 ---
 
@@ -244,22 +208,18 @@ your changes_made entries (e.g., "Experience: NPI role, b2").
 
 ---
 
-{_format_score_signals(score)}
+{_format_score_signals(sanitized_score)}
 
 ---
 
-Return a structured TailoredResume. Only rewrite bullets that overlap with
-job keywords; return others verbatim. Never inflate verbs, never add skills,
-never modify skill text. Copy all titles/companies/dates/awards/education
-verbatim. Every rewrite goes in changes_made with a rationale.
+Return a structured TailoredResume. Only rewrite bullets with job-keyword
+overlap; return others verbatim. Never inflate verbs, never add skills.
 """
     tailored = await structured_complete(
         schema=TailoredResume,
         system=SYSTEM_PROMPT,
         user=user_prompt,
     )
-    # Add back the marginal skills the LLM never saw.
     _merge_marginal_skills_back(tailored, resume)
-    # Defense in depth: snap immutable fields.
     tailored, violations = _enforce_immutable_fields(tailored, resume)
     return tailored, violations

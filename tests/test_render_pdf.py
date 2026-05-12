@@ -78,7 +78,7 @@ async def main():
           f"{len(letter.key_evidence_used)} evidence items)\n")
 
     print(f"[6/6] Rendering PDFs...")
-    safe_name = resume.full_name.replace(" ", "_")
+    safe_name = resume.full_name.title().replace(" ", "_")
     cover_path = render_cover_letter_pdf(
         letter,
         tailored,  # use tailored for matching contact info

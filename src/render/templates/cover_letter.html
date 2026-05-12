@@ -4,18 +4,13 @@
 <meta charset="UTF-8">
 <title>{{ letter.subject }}</title>
 <style>
-  /* ============================================================
-     COVER LETTER — modern tech style
-     Single accent color, system-stack sans-serif fallback,
-     generous whitespace, no decorative chrome.
-     ============================================================ */
   @page {
     size: Letter;
     margin: 0.9in 1in;
   }
 
   :root {
-    --accent: #1a3d5c;       /* deep navy — confident, not corporate */
+    --accent: #1a3d5c;
     --text-primary: #1a1a1a;
     --text-muted: #555;
     --text-faint: #888;
@@ -34,7 +29,8 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Header block: sender info */
+  /* Header: name on left, contact stack on right.
+     name max-width prevents wrap when contact column is narrow. */
   .header {
     display: flex;
     justify-content: space-between;
@@ -42,43 +38,42 @@
     padding-bottom: 16pt;
     margin-bottom: 28pt;
     border-bottom: 1.5px solid var(--accent);
+    gap: 24pt;
   }
   .header .name {
-    font-size: 18pt;
+    font-size: 16pt;
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--accent);
     margin: 0;
+    flex: 1;
+    min-width: 0;
   }
   .header .contact {
-    font-size: 9.5pt;
+    font-size: 9pt;
     color: var(--text-muted);
     text-align: right;
-    line-height: 1.6;
+    line-height: 1.55;
+    flex-shrink: 0;
   }
   .header .contact div { margin: 0; }
 
-  /* Date */
   .date {
     color: var(--text-faint);
     font-size: 10pt;
     margin-bottom: 24pt;
   }
 
-  /* Greeting */
   .greeting {
     margin: 0 0 16pt 0;
     font-weight: 500;
   }
 
-  /* Body paragraphs */
   .body p {
     margin: 0 0 14pt 0;
-    text-align: justify;
-    hyphens: auto;
+    text-align: left;   /* Was 'justify' — left-aligned reads cleaner */
   }
 
-  /* Sign-off */
   .signoff {
     margin-top: 28pt;
     white-space: pre-line;
@@ -90,7 +85,7 @@
 
   <div class="header">
     <div>
-      <p class="name">{{ candidate.full_name }}</p>
+      <p class="name">{{ candidate.full_name | title }}</p>
     </div>
     <div class="contact">
       {% if candidate.email %}<div>{{ candidate.email }}</div>{% endif %}
