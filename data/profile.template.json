@@ -1,0 +1,30 @@
+{
+  "_README": "Edit this file with YOUR real data, then save as data/profile.json. Fields with 'FILL_ME' will block apply_to_job from running. Remove this _README key after editing.",
+
+  "full_name": "Jose Ivan Zaragoza",
+  "email": "FILL_ME@example.com",
+  "phone": "+1 FILL_ME",
+
+  "location_city": "Sunnyvale",
+  "location_state": "CA",
+  "location_country": "US",
+
+  "linkedin_url": null,
+  "github_url": null,
+  "portfolio_url": null,
+
+  "work_auth_status": "FILL_ME — one of: us_citizen | permanent_resident | h1b | f1_opt | tn_visa | other_authorized | needs_sponsorship",
+  "requires_visa_sponsorship_now_or_future": false,
+
+  "gender": "prefer_not_to_say",
+  "ethnicity": "prefer_not_to_say",
+  "veteran_status": "prefer_not_to_say",
+  "disability_status": "prefer_not_to_say",
+
+  "salary_expectation_usd": null,
+  "earliest_start_date": null,
+  "willing_to_relocate": false,
+
+  "how_did_you_hear": null,
+  "pronouns": null
+}

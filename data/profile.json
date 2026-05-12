@@ -1,0 +1,30 @@
+{
+  "_README": "Edit this file with YOUR real data, then save as data/profile.json. Fields with 'FILL_ME' will block apply_to_job from running. Remove this _README key after editing.",
+
+  "full_name": "Jose Ivan Zaragoza",
+  "email": "joseivanzm120@gmail.com",
+  "phone": "+1 4086368017",
+
+  "location_city": "Sunnyvale",
+  "location_state": "CA",
+  "location_country": "US",
+
+  "linkedin_url": null,
+  "github_url": null,
+  "portfolio_url": null,
+
+  "work_auth_status": "us_citizen",
+  "requires_visa_sponsorship_now_or_future": false,
+
+  "gender": "male",
+  "ethnicity": "hispanic_or_latino",
+  "veteran_status": "not_a_veteran",
+  "disability_status": "no_disability",
+
+  "salary_expectation_usd": null,
+  "earliest_start_date": null,
+  "willing_to_relocate": false,
+
+  "how_did_you_hear": null,
+  "pronouns": null
+}
