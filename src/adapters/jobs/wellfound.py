@@ -70,7 +70,7 @@ class WellfoundAdapter(JobAdapter):
         self,
         api_token: Optional[str] = None,
         zone: Optional[str] = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ):
         self._token = api_token or os.getenv("BRIGHTDATA_API_TOKEN", "")
         self._zone = zone or os.getenv("BRIGHTDATA_ZONE", "web_unlocker2")
