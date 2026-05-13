@@ -81,26 +81,29 @@ def _matches_query(job_dict: dict, query: str) -> bool:
     """
     Client-side filtering: does this job match the user's free-text query?
 
-    Strategy: normalize the query into individual terms, require ALL of them
-    to appear (case-insensitive) somewhere in title/description/tags.
+    Matches against title + tags only — NOT the description. Descriptions are
+    thousands of words and cause false positives (e.g. a nuclear-engineering
+    job that mentions Python once deep in the body).
 
-    This is intentionally simple. For better matching we could use embeddings
-    or score_match on every job, but at this stage we just want a coarse
-    filter to reduce 100 jobs to ~20 relevant ones, and let score_match
-    do the smart ranking afterwards.
+    Strategy: strip noise words, then require at least one meaningful term to
+    appear in the job's title or tags.
     """
     if not query:
         return True
 
-    haystack = " ".join([
-        str(job_dict.get("position", "")),
-        str(job_dict.get("description", "")),
-        " ".join(job_dict.get("tags", []) or []),
-    ]).lower()
+    _NOISE = frozenset(["remote", "work", "job", "and", "the", "for", "with"])
+    terms = [
+        t for t in query.lower().split()
+        if len(t) > 2 and t not in _NOISE
+    ]
+    if not terms:
+        return True
 
-    # All terms must be present (AND, not OR). Quick & dirty but useful.
-    terms = [t for t in query.lower().split() if len(t) > 1]
-    return all(term in haystack for term in terms)
+    title = job_dict.get("position", "").lower()
+    tags = " ".join(job_dict.get("tags") or []).lower()
+    haystack = f"{title} {tags}"
+
+    return any(term in haystack for term in terms)
 
 
 class RemoteOKAdapter(JobAdapter):
