@@ -13,6 +13,7 @@ Deploy (Zeabur / Railway / Render):
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -52,10 +53,21 @@ async def _startup() -> None:
     # Allow seeding profile.json from an environment variable (cloud deploys
     # without persistent storage).  Set PROFILE_JSON to the full JSON string.
     if not PROFILE_PATH.exists():
+        # PROFILE_JSON_B64: base64-encoded JSON — safe for all env var parsers.
+        # PROFILE_JSON: raw JSON — fallback, may break Zeabur's raw var editor.
+        seed_b64 = os.getenv("PROFILE_JSON_B64")
         seed = os.getenv("PROFILE_JSON")
-        if seed:
+        raw = None
+        if seed_b64:
             try:
-                profile = CandidateProfile.model_validate_json(seed)
+                raw = base64.b64decode(seed_b64).decode()
+            except Exception:
+                pass
+        elif seed:
+            raw = seed
+        if raw:
+            try:
+                profile = CandidateProfile.model_validate_json(raw)
                 PROFILE_PATH.write_text(profile.model_dump_json(indent=2))
             except Exception:
                 pass  # bad env var — let the PUT endpoint handle it later
