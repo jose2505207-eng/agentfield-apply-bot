@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -104,6 +104,29 @@ async def put_profile(body: dict) -> dict:
     DATA_DIR.mkdir(exist_ok=True)
     PROFILE_PATH.write_text(profile.model_dump_json(indent=2))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Resume upload
+# ---------------------------------------------------------------------------
+
+_MAX_RESUME_BYTES = 20 * 1024 * 1024  # 20 MB
+
+
+@app.post("/api/resume")
+async def post_resume(file: UploadFile = File(...)) -> dict:
+    if file.content_type not in ("application/pdf", "application/octet-stream"):
+        # Some browsers send application/octet-stream for PDFs — accept both
+        # but reject anything obviously not a PDF by checking the filename too.
+        name = file.filename or ""
+        if not name.lower().endswith(".pdf"):
+            raise HTTPException(400, "Only PDF files are accepted.")
+    content = await file.read()
+    if len(content) > _MAX_RESUME_BYTES:
+        raise HTTPException(400, "File too large — maximum 20 MB.")
+    DATA_DIR.mkdir(exist_ok=True)
+    RESUME_PDF_PATH.write_bytes(content)
+    return {"ok": True, "filename": file.filename, "size_bytes": len(content)}
 
 
 # ---------------------------------------------------------------------------

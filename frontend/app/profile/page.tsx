@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -81,6 +81,24 @@ export default function ProfilePage() {
   const [msg, setMsg] = useState("");
   const [msgError, setMsgError] = useState(false);
 
+  // Resume upload state
+  const [resumeUploaded, setResumeUploaded] = useState(false);
+  const [resumeName, setResumeName] = useState("");
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const [resumeMsg, setResumeMsg] = useState("");
+  const [resumeMsgError, setResumeMsgError] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/status`)
+      .then((r) => r.json())
+      .then((s) => {
+        if (s.resume_uploaded) setResumeUploaded(true);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetch(`${API}/api/profile`)
       .then((r) => (r.ok ? r.json() : null))
@@ -112,6 +130,47 @@ export default function ProfilePage() {
         setLoading(false);
       });
   }, []);
+
+  const uploadResume = useCallback(async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setResumeMsg("Only PDF files are accepted.");
+      setResumeMsgError(true);
+      return;
+    }
+    setResumeUploading(true);
+    setResumeMsg("");
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch(`${API}/api/resume`, { method: "POST", body: form });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(d.detail ?? "Upload failed");
+      }
+      setResumeUploaded(true);
+      setResumeName(file.name);
+      setResumeMsg("Uploaded successfully.");
+      setResumeMsgError(false);
+    } catch (err: unknown) {
+      setResumeMsg(String(err));
+      setResumeMsgError(true);
+    } finally {
+      setResumeUploading(false);
+    }
+  }, []);
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) uploadResume(file);
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) uploadResume(file);
+    e.target.value = "";
+  }
 
   function update<K extends keyof Profile>(key: K, val: Profile[K]) {
     setProfile((p) => (p ? { ...p, [key]: val } : p));
@@ -158,6 +217,63 @@ export default function ProfilePage() {
         <p className="text-zinc-500 text-sm mt-1">
           Your personal info is used to fill ATS forms automatically.
         </p>
+      </div>
+
+      {/* Resume drop zone */}
+      <div className="flex flex-col gap-2">
+        <span className="text-xs text-zinc-400 uppercase tracking-wider">Resume (PDF)</span>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          className={`relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 cursor-pointer transition-colors
+            ${dragging
+              ? "border-indigo-400 bg-indigo-950/30"
+              : resumeUploaded
+              ? "border-emerald-700 bg-emerald-950/20"
+              : "border-zinc-700 bg-zinc-900/40 hover:border-zinc-500"
+            }`}
+        >
+          {resumeUploading ? (
+            <span className="text-zinc-400 text-sm">Uploading…</span>
+          ) : resumeUploaded ? (
+            <>
+              <svg className="w-8 h-8 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-emerald-400 text-sm font-medium">
+                {resumeName || "Resume uploaded"}
+              </span>
+              <span className="text-zinc-500 text-xs">Drop a new file to replace</span>
+            </>
+          ) : (
+            <>
+              <svg className="w-8 h-8 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+              <span className="text-zinc-300 text-sm font-medium">
+                Drop your resume here
+              </span>
+              <span className="text-zinc-500 text-xs">or click to browse — PDF only, max 20 MB</span>
+            </>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,application/pdf"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        {resumeMsg && (
+          <span className={`text-xs ${resumeMsgError ? "text-red-400" : "text-emerald-400"}`}>
+            {resumeMsg}
+          </span>
+        )}
       </div>
 
       <form onSubmit={handleSave} className="flex flex-col gap-5">
