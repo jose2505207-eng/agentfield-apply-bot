@@ -18,6 +18,8 @@ original `url` field in JobPosting.url.
 """
 from __future__ import annotations
 import html
+import json
+import os
 import re
 from typing import Any
 
@@ -28,6 +30,7 @@ from src.schemas.job import JobPosting
 
 
 REMOTEOK_API_URL = "https://remoteok.com/api"
+_BRIGHTDATA_URL = "https://api.brightdata.com/request"
 
 # Match HTML tags. Used for description cleanup.
 # Note: this is a simple stripper, not a full HTML parser. Good enough for
@@ -105,15 +108,36 @@ class RemoteOKAdapter(JobAdapter):
 
     source = "remoteok"
 
+    async def _fetch(self) -> list[Any]:
+        """Fetch the RemoteOK feed, routing through Bright Data if available.
+
+        RemoteOK blocks datacenter/cloud IPs with a 403. When
+        BRIGHTDATA_API_TOKEN is set we route the request through the Web
+        Unlocker (residential IPs) to avoid the block.
+        """
+        token = os.getenv("BRIGHTDATA_API_TOKEN", "")
+        zone = os.getenv("BRIGHTDATA_ZONE", "web_unlocker2")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if token:
+                r = await client.post(
+                    _BRIGHTDATA_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"zone": zone, "url": REMOTEOK_API_URL, "format": "raw"},
+                )
+            else:
+                r = await client.get(
+                    REMOTEOK_API_URL,
+                    headers={"User-Agent": "agentfield-apply-bot/0.1"},
+                )
+            r.raise_for_status()
+            return json.loads(r.text)
+
     async def search(self, query: str, max_results: int = 50) -> list[JobPosting]:
         # 1. Fetch the full feed (one HTTP call, returns ~100 jobs).
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                REMOTEOK_API_URL,
-                headers={"User-Agent": "agentfield-apply-bot/0.1"},
-            )
-            response.raise_for_status()
-            data = response.json()
+        data = await self._fetch()
 
         # 2. Skip index 0 (the legal metadata object — has no `id`).
         raw_jobs = [item for item in data if isinstance(item, dict) and "id" in item]
