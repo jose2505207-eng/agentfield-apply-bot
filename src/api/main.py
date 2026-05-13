@@ -150,6 +150,31 @@ async def post_search(req: SearchRequest) -> list[dict]:
     return [j.model_dump() for j in jobs]
 
 
+@app.post("/api/search/debug")
+async def post_search_debug(req: SearchRequest) -> dict:
+    """Same as /api/search but returns per-source errors for debugging."""
+    import asyncio
+    from src.adapters.jobs.base import JobAdapter
+    from src.reasoners.search_jobs import ADAPTERS
+
+    sources = req.sources or list(ADAPTERS.keys())
+    results: dict[str, dict] = {}
+
+    async def _probe(name: str) -> None:
+        adapter = ADAPTERS.get(name)
+        if not adapter:
+            results[name] = {"jobs": [], "error": "unknown source"}
+            return
+        try:
+            jobs = await adapter.search(req.query, max_results=req.max_per_source)
+            results[name] = {"jobs": [j.model_dump() for j in jobs], "error": None}
+        except Exception as e:
+            results[name] = {"jobs": [], "error": f"{type(e).__name__}: {e}"}
+
+    await asyncio.gather(*[_probe(s) for s in sources])
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Application history
 # ---------------------------------------------------------------------------
