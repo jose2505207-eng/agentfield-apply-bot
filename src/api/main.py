@@ -29,6 +29,22 @@ from src.schemas.candidate_profile import CandidateProfile
 from src.schemas.job import JobPosting
 from src.reasoners.search_jobs import search_jobs
 
+
+def _find_actionbook() -> str | None:
+    """Return the actionbook binary path, searching PATH and common NVM locations."""
+    import shutil, glob
+    if path := shutil.which("actionbook"):
+        return path
+    # NVM installs node binaries under ~/.nvm/versions/node/*/bin/
+    candidates = sorted(
+        glob.glob(str(Path.home() / ".nvm/versions/node/*/bin/actionbook")),
+        reverse=True,  # newest version first
+    )
+    for c in candidates:
+        if Path(c).is_file():
+            return c
+    return None
+
 load_dotenv()
 
 app = FastAPI(title="AgentField Apply Bot", version="0.1.0")
@@ -87,6 +103,7 @@ async def get_status() -> dict:
         "history_entries": len(json.loads(HISTORY_PATH.read_text()))
         if HISTORY_PATH.exists()
         else 0,
+        "actionbook_available": _find_actionbook() is not None,
     }
 
 
@@ -238,8 +255,8 @@ async def post_apply(req: ApplyRequest) -> dict:
         raise HTTPException(422, f"Invalid job: {e}")
 
     # Actionbook is a local binary — not available in cloud containers.
-    import shutil
-    if not shutil.which("actionbook"):
+    actionbook_bin = _find_actionbook()
+    if not actionbook_bin:
         raise HTTPException(
             503,
             "Apply loop requires the Actionbook browser agent, which only runs "
@@ -253,6 +270,7 @@ async def post_apply(req: ApplyRequest) -> dict:
     from src.reasoners.score_match import score_match
     from src.reasoners.tailor_cover_letter import tailor_cover_letter
     from src.reasoners.apply_to_job import apply_to_job
+    from src.adapters.browser.actionbook_client import ActionbookClient
 
     parsed_resume = await parse_resume(RESUME_PDF_PATH)
     score = await score_match(parsed_resume, job)
@@ -265,6 +283,7 @@ async def post_apply(req: ApplyRequest) -> dict:
         tailored_resume_pdf=RESUME_PDF_PATH,
         dry_run=req.dry_run,
         mode="local",
+        client=ActionbookClient(binary=actionbook_bin),
     )
 
     return result.model_dump(mode="json")

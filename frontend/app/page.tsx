@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -32,11 +32,13 @@ function JobCard({
   onApply,
   applyState,
   applyMsg,
+  actionbookAvailable,
 }: {
   job: Job;
   onApply: (job: Job) => void;
   applyState: ApplyState;
   applyMsg: string;
+  actionbookAvailable: boolean;
 }) {
   const salary = fmtSalary(job);
   return (
@@ -69,13 +71,24 @@ function JobCard({
         </span>
       </div>
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => onApply(job)}
-          disabled={applyState === "applying"}
-          className="text-sm px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {applyState === "applying" ? "Applying…" : "Apply (dry run)"}
-        </button>
+        {actionbookAvailable ? (
+          <button
+            onClick={() => onApply(job)}
+            disabled={applyState === "applying"}
+            className="text-sm px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {applyState === "applying" ? "Applying…" : "Apply (dry run)"}
+          </button>
+        ) : (
+          <a
+            href={job.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 transition-colors"
+          >
+            Open Job →
+          </a>
+        )}
         {applyMsg && (
           <span
             className={`text-xs ${
@@ -96,9 +109,17 @@ export default function SearchPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [actionbookAvailable, setActionbookAvailable] = useState(false);
 
   const [applyStates, setApplyStates] = useState<Record<string, ApplyState>>({});
   const [applyMsgs, setApplyMsgs] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetch(`${API}/api/status`)
+      .then((r) => r.json())
+      .then((d) => setActionbookAvailable(!!d.actionbook_available))
+      .catch(() => {});
+  }, []);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -239,6 +260,7 @@ export default function SearchPage() {
                 onApply={handleApply}
                 applyState={applyStates[key] ?? "idle"}
                 applyMsg={applyMsgs[key] ?? ""}
+                actionbookAvailable={actionbookAvailable}
               />
             );
           })}
