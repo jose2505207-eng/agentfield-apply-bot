@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+data/profile.json
+data/applications.json
+data/resume.pdf
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+output/
+.git/
+*.md
+tests/

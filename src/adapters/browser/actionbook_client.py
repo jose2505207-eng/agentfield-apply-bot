@@ -61,6 +61,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+_SESSION_IN_USE_RE = re.compile(r"already in use by session '([^']+)'")
+
 
 # ----------------------------------------------------------------------
 # Public types
@@ -214,7 +216,19 @@ class ActionbookClient:
         if open_url:
             args += ["--open-url", open_url]
 
-        out = await self._run(args, timeout=60.0)
+        try:
+            out = await self._run(args, timeout=60.0)
+        except ActionbookError as e:
+            # local mode: if a stale session holds the profile, close it and retry once.
+            if "SESSION_ALREADY_EXISTS" in str(e) and mode == "local":
+                m = _SESSION_IN_USE_RE.search(str(e))
+                if m:
+                    await self.close_session(m.group(1))
+                    out = await self._run(args, timeout=60.0)
+                else:
+                    raise
+            else:
+                raise
         sess, tab = self._parse_status_prefix(out)
         if not sess or not tab:
             raise ActionbookError(
@@ -230,6 +244,10 @@ class ActionbookClient:
     async def list_sessions(self) -> str:
         """Raw output of `actionbook browser list-sessions`. Mostly for debugging."""
         return await self._run(["browser", "list-sessions"])
+
+    async def close_session(self, session_id: str) -> None:
+        """Close a browser session by ID."""
+        await self._run(["browser", "close", "--session", session_id])
 
     # ------------------------------------------------------------------
     # Navigation

@@ -81,7 +81,7 @@ async def main():
         if "bridge: not_listening" in status_out:
             print(
                 "      WARN: bridge: not_listening. Run "
-                "`actionbook browser start --mode extension "
+                "`actionbook browser start --mode local "
                 "--set-session-id s1 --open-url https://www.google.com` "
                 "to wake it up, then re-run this test."
             )
@@ -102,13 +102,15 @@ async def main():
 
     print("[4/4] Live smoke test — start session, snapshot, screenshot...")
     try:
+        browser_mode = os.getenv("ACTIONBOOK_MODE", "local")
         sess: BrowserSession = await ab.start_session(
             session_id="agentfield-smoke",
             open_url="https://www.google.com",
-            mode="extension",
+            mode=browser_mode,
         )
-        print(f"      session_id: {sess.session_id}   tab_id: {sess.tab_id}")
+        print(f"      mode: {browser_mode}   session_id: {sess.session_id}   tab_id: {sess.tab_id}")
 
+        await ab.wait(2.0)  # let the page settle before snapshotting
         snap = await ab.snapshot(session=sess.session_id, tab=sess.tab_id)
         print(f"      snapshot OK ({len(snap)} chars). First 400:")
         print("      ─── snapshot (head) ───")

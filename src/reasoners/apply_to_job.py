@@ -423,6 +423,7 @@ async def apply_to_job(
     dry_run: bool = True,
     confirm: bool = False,
     max_steps: int = 25,
+    mode: str = "local",
     client: Optional[ActionbookClient] = None,
     history_path: Path = DEFAULT_HISTORY_PATH,
     screenshot_dir: Path = Path("output/apply_screenshots"),
@@ -491,7 +492,7 @@ async def apply_to_job(
         sess: BrowserSession = await ab.start_session(
             session_id=_SESSION_ID,
             open_url=job.url,
-            mode="extension",
+            mode=mode,
         )
     except ActionbookError as e:
         result = ApplyResult(

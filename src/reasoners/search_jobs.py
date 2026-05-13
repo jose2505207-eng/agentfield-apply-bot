@@ -16,6 +16,7 @@ import asyncio
 
 from src.adapters.jobs.base import JobAdapter
 from src.adapters.jobs.remoteok import RemoteOKAdapter
+from src.adapters.jobs.wellfound import WellfoundAdapter
 from src.schemas.job import JobPosting
 
 
@@ -24,7 +25,7 @@ from src.schemas.job import JobPosting
 # That's it. No other file needs to change.
 ADAPTERS: dict[str, JobAdapter] = {
     "remoteok": RemoteOKAdapter(),
-    # "wellfound": WellfoundAdapter(),   # added Day 6
+    "wellfound": WellfoundAdapter(),
     # "greenhouse": GreenhouseAdapter(),
 }
 
