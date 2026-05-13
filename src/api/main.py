@@ -225,6 +225,15 @@ async def post_apply(req: ApplyRequest) -> dict:
     except Exception as e:
         raise HTTPException(422, f"Invalid job: {e}")
 
+    # Actionbook is a local binary — not available in cloud containers.
+    import shutil
+    if not shutil.which("actionbook"):
+        raise HTTPException(
+            503,
+            "Apply loop requires the Actionbook browser agent, which only runs "
+            "on the local machine. Run the bot locally with `make start` to use this feature.",
+        )
+
     # Full pipeline: parse resume → score → cover letter → apply.
     # All LLM calls are async; the browser loop is also async. This will
     # take 30–120 seconds — the frontend shows a spinner.

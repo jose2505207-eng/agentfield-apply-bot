@@ -139,9 +139,11 @@ export default function SearchPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ job, dry_run: true }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: Record<string, unknown> = { detail: text };
+      try { data = JSON.parse(text); } catch { /* plain text error */ }
       if (!res.ok) {
-        throw new Error(data.detail ?? JSON.stringify(data));
+        throw new Error((data.detail as string) ?? text);
       }
       const label = data.success ? "Applied!" : `Done: ${data.method_used}`;
       setApplyStates((s) => ({ ...s, [key]: "done" }));

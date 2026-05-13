@@ -103,7 +103,10 @@ def _matches_query(job_dict: dict, query: str) -> bool:
     tags = " ".join(job_dict.get("tags") or []).lower()
     haystack = f"{title} {tags}"
 
-    return any(term in haystack for term in terms)
+    # ALL meaningful terms must appear in title+tags (AND logic, no description).
+    # This prevents a CNC job that mentions Python once in 2000 words from matching
+    # "python engineer", while still catching "Senior Software Engineer" for that query.
+    return all(term in haystack for term in terms)
 
 
 class RemoteOKAdapter(JobAdapter):
